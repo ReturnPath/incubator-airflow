@@ -275,10 +275,9 @@ function updateQueryStringParameter(uri, key, value) {
     var id = '';
     var dag_id = '{{ dag.dag_id }}';
     var task_id = '';
-    var task = tasks!=undefined ? tasks[task_id] : undefined;
     var exection_date = '';
     var subdag_id = '';
-    function call_modal(t, d, sd) {
+    function call_modal(t, d, sd, task_type) {
       task_id = t;
       loc = String(window.location);
       $("#btn_filter").on("click", function(){
@@ -297,8 +296,10 @@ function updateQueryStringParameter(uri, key, value) {
           subdag_id = "{{ dag.dag_id }}."+t;
       }
 
-      if(task != undefined && task.task_type == 'QuboleOperator'){
+      if(task_type !== undefined && task_type === 'QuboleOperator'){
         $('#btn_qds').show();
+      }else{
+        $('#btn_qds').hide();
       }
 
     }
