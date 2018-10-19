@@ -788,7 +788,7 @@ class Airflow(BaseView):
             else:
                 host = 'https://api.qubole.com/v2/analyze?command_id?command_id='
 
-            ti = TaskInstance(task=task, execution_date=execution_date)
+            ti = TaskInstance(task=task, execution_date=dttm)
             qds_command_id = ti.xcom_pull(task_ids=task_id, key='qbol_cmd_id')
 
             if qds_command_id:
