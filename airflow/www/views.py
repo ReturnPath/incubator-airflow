@@ -34,6 +34,7 @@ import json
 import bleach
 import pendulum
 import codecs
+import re
 from collections import defaultdict
 
 import inspect
@@ -72,11 +73,13 @@ import airflow
 from airflow import configuration as conf
 from airflow import models
 from airflow import settings
+from airflow.settings import Session
 from airflow.api.common.experimental.mark_tasks import set_dag_run_state
 from airflow.exceptions import AirflowException
-from airflow.models import XCom, DagRun
+from airflow.models import XCom, DagRun, TaskInstance
 from airflow.ti_deps.dep_context import DepContext, QUEUE_DEPS, SCHEDULER_DEPS
 
+from airflow.hooks.base_hook import BaseHook
 from airflow.models import BaseOperator
 from airflow.operators.subdag_operator import SubDagOperator
 
@@ -104,6 +107,11 @@ login_required = airflow.login.login_required
 current_user = airflow.login.current_user
 logout_user = airflow.login.logout_user
 
+# Details are captured in QBOL-5455
+cluster_id = os.getenv('CLUSTER_ID', "")
+airflow_webserver_proxy_uri = "airflow-webserver-{0}".format(cluster_id)
+airflow_webserver_proxy_admin_uri = "/admin/{0}".format(airflow_webserver_proxy_uri)
+
 FILTER_BY_OWNER = False
 
 PAGE_SIZE = conf.getint('webserver', 'page_size')
@@ -112,6 +120,8 @@ if conf.getboolean('webserver', 'FILTER_BY_OWNER'):
     # filter_by_owner if authentication is enabled and filter_by_owner is true
     FILTER_BY_OWNER = not current_app.config['LOGIN_DISABLED']
 
+def override_url_for(endpoint, **values):
+    return "/{0}{1}".format(airflow_webserver_proxy_uri, url_for(endpoint, **values))
 
 def dag_link(v, c, m, p):
     if m.dag_id is None:
@@ -739,6 +749,62 @@ class Airflow(BaseView):
         logout_user()
         flash('You have been logged out.')
         return redirect(url_for('admin.index'))
+
+    @expose('/redirect')
+    @login_required
+    @wwwutils.action_logging
+    def redirect(self):
+        dag_id = request.args.get('dag_id')
+        task_id = request.args.get('task_id')
+        execution_date = request.args.get('execution_date')
+        redirect_to = request.args.get('redirect_to')
+        dttm = pendulum.parse(execution_date)
+        dag = dagbag.get_dag(dag_id)
+        if not dag or task_id not in dag.task_ids:
+            flash(
+                "Task [{}.{}] doesn't seem to exist"
+                " at the moment".format(dag_id, task_id),
+                "error")
+            return redirect(override_url_for('admin.index'))
+
+        session = Session()
+        url = None
+
+        if redirect_to == 'qds':
+            for t in dag.tasks:
+                if t.task_id == task_id:
+                    task = t
+                    break
+
+            conn = BaseHook.get_connection(task.kwargs['qubole_conn_id'])
+            host = None
+            if conn:
+                if conn.host[-3:] == 'api':
+                    host = re.sub(r'api$', 'v2/analyze?command_id=', conn.host)
+                else:
+                    host = conn.host + '/v2/analyze?command_id='
+                if host[:4] != 'http':
+                    host = 'https://' + host
+            else:
+                host = 'https://api.qubole.com/v2/analyze?command_id?command_id='
+
+            ti = TaskInstance(task=task, execution_date=execution_date)
+            qds_command_id = ti.xcom_pull(task_ids=task_id, key='qbol_cmd_id')
+
+            if qds_command_id:
+                url = host + str(qds_command_id)
+
+        session.commit()
+        session.close()
+
+        if url:
+            return redirect(url)
+        else:
+            flash(
+                "Couldn't redirect to {} for [{}.{}]"
+                " at the moment".format(redirect_to, dag_id, task_id),
+                "error")
+            return redirect(override_url_for('admin.index'))
 
     @expose('/rendered')
     @login_required
