@@ -18,14 +18,10 @@
 # specific language governing permissions and limitations
 # under the License.
 import os
-import warnings
 from airflow import configuration
 from airflow.bin.cli import CLIFactory
 
 if __name__ == '__main__':
-
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", category=PendingDeprecationWarning, module='airflow')
 
     if configuration.conf.get("core", "security") == 'kerberos':
         os.environ['KRB5CCNAME'] = configuration.conf.get('kerberos', 'ccache')
