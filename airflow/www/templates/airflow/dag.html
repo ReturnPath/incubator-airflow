@@ -138,6 +138,9 @@
           <button id="btn_log" type="button" class="btn btn-primary">
             View Log
           </button>
+          <button id="btn_qds" type="button" class="btn btn-primary">
+            Goto QDS
+          </button>
           <hr/>
           <button id="btn_run" type="button" class="btn btn-primary"
             title="Runs a single task instance">
@@ -272,6 +275,7 @@ function updateQueryStringParameter(uri, key, value) {
     var id = '';
     var dag_id = '{{ dag.dag_id }}';
     var task_id = '';
+    var task = tasks!=undefined ? tasks[task_id] : undefined;
     var exection_date = '';
     var subdag_id = '';
     function call_modal(t, d, sd) {
@@ -285,13 +289,18 @@ function updateQueryStringParameter(uri, key, value) {
       $('#task_id').html(t);
       $('#execution_date').html(d);
       $('#myModal').modal({});
-      $("#myModal").css("margin-top","0px")
-        if (subdag_id===undefined)
-            $("#div_btn_subdag").hide();
-        else {
-            $("#div_btn_subdag").show();
-            subdag_id = "{{ dag.dag_id }}."+t;
-        }
+      $("#myModal").css("margin-top","0px");
+      if (subdag_id===undefined) {
+        $("#div_btn_subdag").hide();
+      } else {
+          $("#div_btn_subdag").show();
+          subdag_id = "{{ dag.dag_id }}."+t;
+      }
+
+      if(task != undefined && task.task_type == 'QuboleOperator'){
+        $('#btn_qds').show();
+      }
+
     }
 
     function call_modal_dag(dag) {
@@ -323,6 +332,15 @@ function updateQueryStringParameter(uri, key, value) {
         "&dag_id=" + encodeURIComponent(dag_id) +
         "&execution_date=" + encodeURIComponent(execution_date);
       window.location = url;
+    });
+
+    $("#btn_qds").click(function(){
+      url = "{{ url_for('airflow.redirect') }}" +
+        "?task_id=" + encodeURIComponent(task_id) +
+        "&dag_id=" + encodeURIComponent(dag_id) +
+        "&execution_date=" + encodeURIComponent(execution_date) +
+        "&redirect_to=qds";
+      window.open(url, '_blank');
     });
 
     $("#btn_task").click(function(){
