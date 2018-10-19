@@ -48,8 +48,8 @@ log = LoggingMixin().log
 # show Airflow's deprecation warnings
 warnings.filterwarnings(
     action='default', category=DeprecationWarning, module='airflow')
-warnings.filterwarnings(
-    action='default', category=PendingDeprecationWarning, module='airflow')
+#warnings.filterwarnings(
+#    action='default', category=PendingDeprecationWarning, module='airflow')
 
 
 def generate_fernet_key():
