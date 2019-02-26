@@ -91,6 +91,7 @@ class SparkSubmitHook(BaseHook, LoggingMixin):
                  files=None,
                  py_files=None,
                  driver_classpath=None,
+                 driver_java_opts=None,
                  jars=None,
                  java_class=None,
                  packages=None,
@@ -112,6 +113,7 @@ class SparkSubmitHook(BaseHook, LoggingMixin):
         self._files = files
         self._py_files = py_files
         self._driver_classpath = driver_classpath
+        self._driver_java_opts = driver_java_opts
         self._jars = jars
         self._java_class = java_class
         self._packages = packages
@@ -240,6 +242,8 @@ class SparkSubmitHook(BaseHook, LoggingMixin):
             connection_cmd += ["--py-files", self._py_files]
         if self._driver_classpath:
             connection_cmd += ["--driver-classpath", self._driver_classpath]
+        if self._driver_java_opts:
+            connection_cmd += ["--driver-java-options", self._driver_java_opts]
         if self._jars:
             connection_cmd += ["--jars", self._jars]
         if self._packages:

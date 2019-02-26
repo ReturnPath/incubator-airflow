@@ -95,6 +95,7 @@ class SparkSubmitOperator(BaseOperator):
                  files=None,
                  py_files=None,
                  driver_classpath=None,
+                 driver_java_opts=None,
                  jars=None,
                  java_class=None,
                  packages=None,
@@ -119,6 +120,7 @@ class SparkSubmitOperator(BaseOperator):
         self._files = files
         self._py_files = py_files
         self._driver_classpath = driver_classpath
+        self._driver_java_opts = driver_java_opts
         self._jars = jars
         self._java_class = java_class
         self._packages = packages
@@ -148,6 +150,7 @@ class SparkSubmitOperator(BaseOperator):
             files=self._files,
             py_files=self._py_files,
             driver_classpath=self._driver_classpath,
+            driver_java_opts=self._driver_java_opts,
             jars=self._jars,
             java_class=self._java_class,
             packages=self._packages,
