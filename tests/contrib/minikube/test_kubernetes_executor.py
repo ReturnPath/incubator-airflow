@@ -16,6 +16,7 @@
 # under the License.
 
 
+import os
 import unittest
 from subprocess import check_call, check_output
 import requests.exceptions
@@ -25,18 +26,25 @@ import six
 import re
 
 try:
-    check_call(["kubectl", "get", "pods"])
+    check_call(["/usr/local/bin/kubectl", "get", "pods"])
 except Exception as e:
-    raise unittest.SkipTest(
-        "Kubernetes integration tests require a minikube cluster;"
-        "Skipping tests {}".format(e)
-    )
+    if os.environ.get('KUBERNETES_VERSION'):
+        raise e
+    else:
+        raise unittest.SkipTest(
+            "Kubernetes integration tests require a minikube cluster;"
+            "Skipping tests {}".format(e)
+        )
 
 
 def get_minikube_host():
-    host_ip = check_output(['minikube', 'ip'])
-    if six.PY3:
-        host_ip = host_ip.decode('UTF-8')
+    if "MINIKUBE_IP" in os.environ:
+        host_ip = os.environ['MINIKUBE_IP']
+    else:
+        host_ip = check_output(['/usr/local/bin/minikube', 'ip'])
+        if six.PY3:
+            host_ip = host_ip.decode('UTF-8')
+
     host = '{}:30809'.format(host_ip.strip())
     return host
 
@@ -46,7 +54,7 @@ class KubernetesExecutorTest(unittest.TestCase):
     def _delete_airflow_pod():
         air_pod = check_output(['kubectl', 'get', 'pods']).decode()
         air_pod = air_pod.split('\n')
-        names = [re.compile('\s+').split(x)[0] for x in air_pod if 'airflow' in x]
+        names = [re.compile(r'\s+').split(x)[0] for x in air_pod if 'airflow' in x]
         if names:
             check_call(['kubectl', 'delete', 'pod', names[0]])
 
@@ -125,8 +133,13 @@ class KubernetesExecutorTest(unittest.TestCase):
             'http://{host}/api/experimental/'
             'dags/{dag_id}/paused/false'.format(host=host, dag_id=dag_id)
         )
+        try:
+            result_json = result.json()
+        except ValueError:
+            result_json = str(result)
+
         self.assertEqual(result.status_code, 200, "Could not enable DAG: {result}"
-                         .format(result=result.json()))
+                         .format(result=result_json))
 
         # Trigger a new dagrun
         result = requests.post(
@@ -134,8 +147,13 @@ class KubernetesExecutorTest(unittest.TestCase):
             'dags/{dag_id}/dag_runs'.format(host=host, dag_id=dag_id),
             json={}
         )
+        try:
+            result_json = result.json()
+        except ValueError:
+            result_json = str(result)
+
         self.assertEqual(result.status_code, 200, "Could not trigger a DAG-run: {result}"
-                         .format(result=result.json()))
+                         .format(result=result_json))
 
         time.sleep(1)
 
@@ -150,7 +168,7 @@ class KubernetesExecutorTest(unittest.TestCase):
 
     def test_integration_run_dag(self):
         host = get_minikube_host()
-        dag_id = 'example_kubernetes_annotation'
+        dag_id = 'example_kubernetes_executor_config'
 
         result_json = self.start_dag(dag_id=dag_id, host=host)
 
@@ -173,7 +191,7 @@ class KubernetesExecutorTest(unittest.TestCase):
 
     def test_integration_run_dag_with_scheduler_failure(self):
         host = get_minikube_host()
-        dag_id = 'example_kubernetes_annotation'
+        dag_id = 'example_kubernetes_executor_config'
 
         result_json = self.start_dag(dag_id=dag_id, host=host)
 

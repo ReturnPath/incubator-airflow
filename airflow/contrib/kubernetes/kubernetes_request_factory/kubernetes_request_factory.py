@@ -186,3 +186,13 @@ class KubernetesRequestFactory:
             req['spec']['imagePullSecrets'] = [{
                 'name': pull_secret
             } for pull_secret in pod.image_pull_secrets.split(',')]
+
+    @staticmethod
+    def extract_tolerations(pod, req):
+        if pod.tolerations:
+            req['spec']['tolerations'] = pod.tolerations
+
+    @staticmethod
+    def extract_security_context(pod, req):
+        if pod.security_context:
+            req['spec']['securityContext'] = pod.security_context

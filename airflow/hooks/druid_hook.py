@@ -68,6 +68,7 @@ class DruidHook(BaseHook):
     def submit_indexing_job(self, json_index_spec):
         url = self.get_conn_url()
 
+        self.log.info("Druid ingestion spec: %s", json_index_spec)
         req_index = requests.post(url, json=json_index_spec, headers=self.header)
         if req_index.status_code != 200:
             raise AirflowException('Did not get 200 when '
@@ -76,6 +77,7 @@ class DruidHook(BaseHook):
         req_json = req_index.json()
         # Wait until the job is completed
         druid_task_id = req_json['task']
+        self.log.info("Druid indexing task-id: %s", druid_task_id)
 
         running = True
 
@@ -134,8 +136,7 @@ class DruidDbApiHook(DbApiHook):
             path=conn.extra_dejson.get('endpoint', '/druid/v2/sql'),
             scheme=conn.extra_dejson.get('schema', 'http')
         )
-        self.log.info('Get the connection to druid '
-                      'broker on {host}'.format(host=conn.host))
+        self.log.info('Get the connection to druid broker on %s', conn.host)
         return druid_broker_conn
 
     def get_uri(self):

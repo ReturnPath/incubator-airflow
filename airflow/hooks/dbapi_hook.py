@@ -163,10 +163,11 @@ class DbApiHook(BaseHook):
                 for s in sql:
                     if sys.version_info[0] < 3:
                         s = s.encode('utf-8')
-                    self.log.info(s)
                     if parameters is not None:
+                        self.log.info("{} with parameters {}".format(s, parameters))
                         cur.execute(s, parameters)
                     else:
+                        self.log.info(s)
                         cur.execute(s)
 
             # If autocommit was set to False for db that supports autocommit,
@@ -191,10 +192,11 @@ class DbApiHook(BaseHook):
         Return True if conn.autocommit is set to True.
         Return False if conn.autocommit is not set or set to False or conn
         does not support autocommit.
+
         :param conn: Connection to get autocommit setting from.
         :type conn: connection object.
         :return: connection autocommit setting.
-        :rtype bool.
+        :rtype: bool
         """
 
         return getattr(conn, 'autocommit', False) and self.supports_autocommit
@@ -254,12 +256,11 @@ class DbApiHook(BaseHook):
                     if commit_every and i % commit_every == 0:
                         conn.commit()
                         self.log.info(
-                            "Loaded {i} into {table} rows so far".format(**locals())
+                            "Loaded %s into %s rows so far", i, table
                         )
 
             conn.commit()
-        self.log.info(
-            "Done loading. Loaded a total of {i} rows".format(**locals()))
+        self.log.info("Done loading. Loaded a total of %s rows", i)
 
     @staticmethod
     def _serialize_cell(cell, conn=None):

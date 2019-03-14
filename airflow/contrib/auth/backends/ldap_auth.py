@@ -24,7 +24,7 @@ from flask import flash
 from wtforms import Form, PasswordField, StringField
 from wtforms.validators import InputRequired
 
-from ldap3 import Server, Connection, Tls, LEVEL, SUBTREE
+from ldap3 import Server, Connection, Tls, set_config_parameter, LEVEL, SUBTREE
 import ssl
 
 from flask import url_for, redirect
@@ -55,16 +55,26 @@ class LdapException(Exception):
 
 
 def get_ldap_connection(dn=None, password=None):
-    tls_configuration = None
-    use_ssl = False
     try:
         cacert = configuration.conf.get("ldap", "cacert")
-        tls_configuration = Tls(validate=ssl.CERT_REQUIRED, ca_certs_file=cacert)
-        use_ssl = True
-    except Exception:
+    except AirflowConfigException:
         pass
 
-    server = Server(configuration.conf.get("ldap", "uri"), use_ssl, tls_configuration)
+    try:
+        ignore_malformed_schema = configuration.conf.get("ldap", "ignore_malformed_schema")
+    except AirflowConfigException:
+        pass
+
+    if ignore_malformed_schema:
+        set_config_parameter('IGNORE_MALFORMED_SCHEMA', ignore_malformed_schema)
+
+    tls_configuration = Tls(validate=ssl.CERT_REQUIRED,
+                            ca_certs_file=cacert)
+
+    server = Server(configuration.conf.get("ldap", "uri"),
+                    use_ssl=True,
+                    tls=tls_configuration)
+
     conn = Connection(server, native(dn), native(password))
 
     if not conn.bind():
@@ -225,7 +235,7 @@ class LdapUser(models.User):
             Unable to parse LDAP structure. If you're using Active Directory
             and not specifying an OU, you must set search_scope=SUBTREE in airflow.cfg.
             %s
-            """ % traceback.format_exc())
+            """, traceback.format_exc())
             raise LdapException(
                 "Could not parse LDAP structure. "
                 "Try setting search_scope in airflow.cfg, or check logs"
@@ -235,14 +245,17 @@ class LdapUser(models.User):
             log.info("Password incorrect for user %s", username)
             raise AuthenticationError("Invalid username or password")
 
+    @property
     def is_active(self):
         """Required by flask_login"""
         return True
 
+    @property
     def is_authenticated(self):
         """Required by flask_login"""
         return True
 
+    @property
     def is_anonymous(self):
         """Required by flask_login"""
         return False
@@ -273,7 +286,7 @@ def load_user(userid, session=None):
 
 @provide_session
 def login(self, request, session=None):
-    if current_user.is_authenticated():
+    if current_user.is_authenticated:
         flash("You are already logged in")
         return redirect(url_for('admin.index'))
 

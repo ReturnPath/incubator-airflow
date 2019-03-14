@@ -23,25 +23,35 @@ set -x
 DIRNAME=$(cd "$(dirname "$0")"; pwd)
 AIRFLOW_ROOT="$DIRNAME/../.."
 
+nose_args=$@
 # Fix file permissions
-sudo chown -R airflow.airflow . $HOME/.wheelhouse/ $HOME/.cache/pip
+sudo chown -R airflow.airflow . $HOME/.cache $HOME/.wheelhouse/ $HOME/.cache/pip
+if [ -d $HOME/.minikube ]; then
+    sudo chown -R airflow.airflow $HOME/.kube $HOME/.minikube
+fi
 
 if [[ $PYTHON_VERSION == '3' ]]; then
   PIP=pip3
 else
-  PIP=pip
+  PIP=pip2
 fi
 
-sudo $PIP install --upgrade pip
-sudo $PIP install tox
+sudo -H $PIP install --upgrade pip
+sudo -H $PIP install tox
 
 cd $AIRFLOW_ROOT && $PIP --version && tox --version
 
 if [ -z "$KUBERNETES_VERSION" ];
 then
-  tox -e $TOX_ENV
+  tox -e $TOX_ENV $nose_args
 else
-  KUBERNETES_VERSION=${KUBERNETES_VERSION} $DIRNAME/kubernetes/setup_kubernetes.sh && \
+  # This script runs inside a container, the path of the kubernetes certificate
+  # is /home/travis/.minikube/client.crt but the user in the container is `airflow`
+  if [ ! -d /home/travis ]; then
+    sudo mkdir -p /home/travis
+  fi
+  sudo ln -s /home/airflow/.minikube /home/travis/.minikube
+
   tox -e $TOX_ENV -- tests.contrib.minikube \
                      --with-coverage \
                      --cover-erase \

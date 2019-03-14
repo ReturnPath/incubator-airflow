@@ -7,9 +7,9 @@
 # to you under the Apache License, Version 2.0 (the
 # "License"); you may not use this file except in compliance
 # with the License.  You may obtain a copy of the License at
-# 
+#
 #   http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing,
 # software distributed under the License is distributed on an
 # "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
@@ -63,9 +63,6 @@ def upgrade():
         op.alter_column(table_name='job', column_name='end_date', type_=mysql.TIMESTAMP(fsp=6))
         op.alter_column(table_name='job', column_name='latest_heartbeat', type_=mysql.TIMESTAMP(fsp=6))
 
-        op.alter_column(table_name='known_event', column_name='start_date', type_=mysql.TIMESTAMP(fsp=6))
-        op.alter_column(table_name='known_event', column_name='end_date', type_=mysql.TIMESTAMP(fsp=6))
-
         op.alter_column(table_name='log', column_name='dttm', type_=mysql.TIMESTAMP(fsp=6))
         op.alter_column(table_name='log', column_name='execution_date', type_=mysql.TIMESTAMP(fsp=6))
 
@@ -86,8 +83,8 @@ def upgrade():
         op.alter_column(table_name='xcom', column_name='timestamp', type_=mysql.TIMESTAMP(fsp=6))
         op.alter_column(table_name='xcom', column_name='execution_date', type_=mysql.TIMESTAMP(fsp=6))
     else:
-        # sqlite datetime is fine as is not converting
-        if conn.dialect.name == 'sqlite':
+        # sqlite and mssql datetime are fine as is.  Therefore, not converting
+        if conn.dialect.name in ('sqlite', 'mssql'):
             return
 
         # we try to be database agnostic, but not every db (e.g. sqlserver)
@@ -112,9 +109,6 @@ def upgrade():
         op.alter_column(table_name='job', column_name='start_date', type_=sa.TIMESTAMP(timezone=True))
         op.alter_column(table_name='job', column_name='end_date', type_=sa.TIMESTAMP(timezone=True))
         op.alter_column(table_name='job', column_name='latest_heartbeat', type_=sa.TIMESTAMP(timezone=True))
-
-        op.alter_column(table_name='known_event', column_name='start_date', type_=sa.TIMESTAMP(timezone=True))
-        op.alter_column(table_name='known_event', column_name='end_date', type_=sa.TIMESTAMP(timezone=True))
 
         op.alter_column(table_name='log', column_name='dttm', type_=sa.TIMESTAMP(timezone=True))
         op.alter_column(table_name='log', column_name='execution_date', type_=sa.TIMESTAMP(timezone=True))
@@ -159,9 +153,6 @@ def downgrade():
         op.alter_column(table_name='job', column_name='end_date', type_=mysql.DATETIME(fsp=6))
         op.alter_column(table_name='job', column_name='latest_heartbeat', type_=mysql.DATETIME(fsp=6))
 
-        op.alter_column(table_name='known_event', column_name='start_date', type_=mysql.DATETIME(fsp=6))
-        op.alter_column(table_name='known_event', column_name='end_date', type_=mysql.DATETIME(fsp=6))
-
         op.alter_column(table_name='log', column_name='dttm', type_=mysql.DATETIME(fsp=6))
         op.alter_column(table_name='log', column_name='execution_date', type_=mysql.DATETIME(fsp=6))
 
@@ -182,7 +173,7 @@ def downgrade():
         op.alter_column(table_name='xcom', column_name='DATETIME', type_=mysql.DATETIME(fsp=6))
         op.alter_column(table_name='xcom', column_name='execution_date', type_=mysql.DATETIME(fsp=6))
     else:
-        if conn.dialect.name == 'sqlite':
+        if conn.dialect.name in ('sqlite', 'mssql'):
             return
 
         # we try to be database agnostic, but not every db (e.g. sqlserver)
@@ -207,9 +198,6 @@ def downgrade():
         op.alter_column(table_name='job', column_name='start_date', type_=sa.DateTime())
         op.alter_column(table_name='job', column_name='end_date', type_=sa.DateTime())
         op.alter_column(table_name='job', column_name='latest_heartbeat', type_=sa.DateTime())
-
-        op.alter_column(table_name='known_event', column_name='start_date', type_=sa.DateTime())
-        op.alter_column(table_name='known_event', column_name='end_date', type_=sa.DateTime())
 
         op.alter_column(table_name='log', column_name='dttm', type_=sa.DateTime())
         op.alter_column(table_name='log', column_name='execution_date', type_=sa.DateTime())

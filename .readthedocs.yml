@@ -24,9 +24,10 @@ python:
         - doc
         - docker
         - emr
-        - gcp_api
+        - gcp
         - s3
         - salesforce
         - sendgrid
         - ssh
         - slack
+        - qds
