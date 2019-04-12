@@ -7,9 +7,9 @@
 # to you under the Apache License, Version 2.0 (the
 # "License"); you may not use this file except in compliance
 # with the License.  You may obtain a copy of the License at
-# 
+#
 #   http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing,
 # software distributed under the License is distributed on an
 # "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
@@ -23,7 +23,7 @@ DAG designed to test what happens when a DAG with pooled tasks is run
 by a BackfillJob.
 Addresses issue #1225.
 """
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from airflow.models import DAG
 from airflow.operators.dummy_operator import DummyOperator
@@ -37,8 +37,10 @@ default_args = dict(
     start_date=DEFAULT_DATE,
     owner='airflow')
 
+
 def fail():
     raise ValueError('Expected failure.')
+
 
 def delayed_fail():
     """
@@ -49,6 +51,7 @@ def delayed_fail():
     """
     time.sleep(5)
     raise ValueError('Expected failure.')
+
 
 # DAG tests backfill with pooled tasks
 # Previously backfill would queue the task but never run it
@@ -146,4 +149,16 @@ dag8_task2 = PythonOperator(
     task_id='test_dagrun_fail',
     dag=dag8,
     python_callable=fail,
+)
+
+# DAG tests that a Dag run that completes but has a root in the future is marked as success
+dag9 = DAG(dag_id='test_dagrun_states_root_future', default_args=default_args)
+dag9_task1 = DummyOperator(
+    task_id='current',
+    dag=dag9,
+)
+dag8_task2 = DummyOperator(
+    task_id='future',
+    dag=dag9,
+    start_date=DEFAULT_DATE + timedelta(days=1),
 )

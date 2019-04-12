@@ -21,9 +21,11 @@ from setuptools import setup, find_packages, Command
 from setuptools.command.test import test as TestCommand
 
 import imp
+import io
 import logging
 import os
 import sys
+import subprocess
 
 logger = logging.getLogger(__name__)
 
@@ -33,24 +35,8 @@ version = imp.load_source(
 
 PY3 = sys.version_info[0] == 3
 
-
-# See LEGAL-362
-def verify_gpl_dependency():
-    # The Read the Docs build environment [1] does a pip install of Airflow which cannot
-    # be overridden with custom environment variables, so we detect the READTHEDOCS env
-    # var they provide to set the env var that avoids the GPL dependency on install when
-    # building the docs site.
-    # [1]: http://docs.readthedocs.io/en/latest/builds.html#build-environment
-    if os.getenv("READTHEDOCS") == "True":
-        os.environ["SLUGIFY_USES_TEXT_UNIDECODE"] = "yes"
-
-    if (not os.getenv("AIRFLOW_GPL_UNIDECODE")
-            and not os.getenv("SLUGIFY_USES_TEXT_UNIDECODE") == "yes"):
-        raise RuntimeError("By default one of Airflow's dependencies installs a GPL "
-                           "dependency (unidecode). To avoid this dependency set "
-                           "SLUGIFY_USES_TEXT_UNIDECODE=yes in your environment when you "
-                           "install or upgrade Airflow. To force installing the GPL "
-                           "version set AIRFLOW_GPL_UNIDECODE")
+with io.open('README.md', encoding='utf-8') as f:
+    long_description = f.read()
 
 
 class Tox(TestCommand):
@@ -84,6 +70,23 @@ class CleanCommand(Command):
 
     def run(self):
         os.system('rm -vrf ./build ./dist ./*.pyc ./*.tgz ./*.egg-info')
+
+
+class CompileAssets(Command):
+    """
+    Custom compile assets command to compile and build the frontend
+    assets using npm and webpack.
+    """
+    user_options = []
+
+    def initialize_options(self):
+        pass
+
+    def finalize_options(self):
+        pass
+
+    def run(self):
+        subprocess.call('./airflow/www_rbac/compile_assets.sh')
 
 
 def git_version(version):
@@ -121,7 +124,8 @@ def write_version(filename=os.path.join(*['airflow',
     with open(filename, 'w') as a:
         a.write(text)
 
-async = [
+
+async_packages = [
     'greenlet>=0.4.9',
     'eventlet>= 0.9.7',
     'gevent>=0.13'
@@ -133,10 +137,13 @@ azure_data_lake = [
     'azure-mgmt-datalake-store==0.4.0',
     'azure-datalake-store==0.0.19'
 ]
+azure_cosmos = ['azure-cosmos>=3.0.1']
+azure_container_instances = ['azure-mgmt-containerinstance']
 cassandra = ['cassandra-driver>=3.13.0']
 celery = [
     'celery>=4.1.1, <4.2.0',
-    'flower>=0.7.3, <1.0'
+    'flower>=0.7.3, <1.0',
+    'tornado>=4.2.0, <6.0',  # Dep of flower. Pin to a version that works on Py3.5.2
 ]
 cgroups = [
     'cgroupspy>=0.1.4',
@@ -147,39 +154,50 @@ crypto = ['cryptography>=0.9.3']
 dask = [
     'distributed>=1.17.1, <2'
 ]
-databricks = ['requests>=2.5.1, <3']
+databricks = ['requests>=2.20.0, <3']
 datadog = ['datadog>=0.14.0']
 doc = [
-    'mock',
-    'sphinx>=1.2.3',
     'sphinx-argparse>=0.1.13',
+    'sphinx-autoapi>=0.7.1',
+    'Sphinx-PyPI-upload>=0.2.1',
     'sphinx-rtd-theme>=0.1.6',
-    'Sphinx-PyPI-upload>=0.2.1'
+    'sphinx>=1.2.3',
+    'sphinxcontrib-httpdomain>=1.7.0',
 ]
-docker = ['docker>=2.0.0']
+docker = ['docker~=3.0']
 druid = ['pydruid>=0.4.1']
 elasticsearch = [
     'elasticsearch>=5.0.0,<6.0.0',
     'elasticsearch-dsl>=5.0.0,<6.0.0'
 ]
-emr = ['boto3>=1.0.0']
+emr = ['boto3>=1.0.0, <1.8.0']
 gcp_api = [
-    'httplib2>=0.9.2',
     'google-api-python-client>=1.6.0, <2.0.0dev',
-    'google-auth>=1.0.0, <2.0.0dev',
     'google-auth-httplib2>=0.0.1',
+    'google-auth>=1.0.0, <2.0.0dev',
+    'google-cloud-bigtable==0.31.0',
     'google-cloud-container>=0.1.1',
+    'google-cloud-language>=1.1.1',
+    'google-cloud-spanner>=1.7.1',
+    'google-cloud-translate>=1.3.3',
+    'google-cloud-vision>=0.35.2',
+    'grpcio-gcp>=0.2.2',
+    'httplib2~=0.9.2',
+    'pandas-gbq',
     'PyOpenSSL',
-    'pandas-gbq'
 ]
-github_enterprise = ['Flask-OAuthlib>=0.9.1']
+flask_oauth = [
+    'Flask-OAuthlib>=0.9.1',
+    'oauthlib!=2.0.3,!=2.0.4,!=2.0.5,<3.0.0,>=1.1.2',
+    'requests-oauthlib==1.1.0'
+]
 hdfs = ['snakebite>=2.7.8']
 hive = [
     'hmsclient>=0.1.0',
     'pyhive>=0.6.0',
 ]
 jdbc = ['jaydebeapi>=1.1.1']
-jenkins = ['python-jenkins>=0.4.15']
+jenkins = ['python-jenkins>=1.0.0']
 jira = ['JIRA>1.0.7']
 kerberos = ['pykerberos>=1.1.13',
             'requests_kerberos>=0.10.0',
@@ -187,29 +205,29 @@ kerberos = ['pykerberos>=1.1.13',
             'snakebite[kerberos]>=2.7.8']
 kubernetes = ['kubernetes>=3.0.0',
               'cryptography>=2.0.0']
-ldap = ['ldap3>=0.9.9.1']
+ldap = ['ldap3>=2.5.1']
 mssql = ['pymssql>=2.1.1']
-mysql = ['mysqlclient>=1.3.6']
+mysql = ['mysqlclient>=1.3.6,<1.4']
 oracle = ['cx_Oracle>=5.1.2']
 password = [
     'bcrypt>=2.0.0',
     'flask-bcrypt>=0.7.1',
 ]
-pinot = ['pinotdb>=0.1.1']
-postgres = ['psycopg2-binary>=2.7.4']
+pinot = ['pinotdb==0.1.1']
+postgres = ['psycopg2>=2.7.4,<2.8']
 qds = ['qds-sdk>=1.9.6']
 rabbitmq = ['librabbitmq>=1.6.1']
-redis = ['redis>=2.10.5']
-s3 = ['boto3>=1.7.0']
+redis = ['redis~=3.2']
+s3 = ['boto3>=1.7.0, <1.8.0']
 salesforce = ['simple-salesforce>=0.72']
 samba = ['pysmbclient>=0.1.3']
 segment = ['analytics-python>=1.2.9']
-sendgrid = ['sendgrid>=5.2.0']
+sendgrid = ['sendgrid>=5.2.0,<6']
 slack = ['slackclient>=1.0.0']
 mongo = ['pymongo>=3.6.0']
 snowflake = ['snowflake-connector-python>=1.5.2',
              'snowflake-sqlalchemy>=1.1.0']
-ssh = ['paramiko>=2.1.1', 'pysftp>=0.2.9']
+ssh = ['paramiko>=2.1.1', 'pysftp>=0.2.9', 'sshtunnel>=0.1.4,<0.2']
 statsd = ['statsd>=3.0.1, <4.0']
 vertica = ['vertica-python>=0.5.1']
 webhdfs = ['hdfs[dataframe,avro,kerberos]>=2.0.4']
@@ -220,13 +238,13 @@ all_dbs = postgres + mysql + hive + mssql + hdfs + vertica + cloudant + druid + 
     + cassandra + mongo
 
 devel = [
-    'click',
+    'beautifulsoup4~=4.7.1',
+    'click==6.7',
     'freezegun',
     'jira',
-    'lxml>=3.3.4',
-    'mock',
+    'mock;python_version<"3.3"',
     'mongomock',
-    'moto==1.1.19',
+    'moto==1.3.5',
     'nose',
     'nose-ignore-docstring==0.2',
     'nose-timer',
@@ -236,15 +254,17 @@ devel = [
     'pywinrm',
     'qds-sdk>=1.9.6',
     'rednose',
-    'requests_mock'
+    'requests_mock',
+    'flake8>=3.6.0',
 ]
 devel_minreq = devel + kubernetes + mysql + doc + password + s3 + cgroups
 devel_hadoop = devel_minreq + hive + hdfs + webhdfs + kerberos
+devel_azure = devel_minreq + azure_data_lake + azure_cosmos
 devel_all = (sendgrid + devel + all_dbs + doc + samba + s3 + slack + crypto + oracle +
              docker + ssh + kubernetes + celery + azure_blob_storage + redis + gcp_api +
              datadog + zendesk + jdbc + ldap + kerberos + password + webhdfs + jenkins +
-             druid + pinot + segment + snowflake + elasticsearch + azure_data_lake +
-             atlas)
+             druid + pinot + segment + snowflake + elasticsearch + azure_data_lake + azure_cosmos +
+             atlas + azure_container_instances)
 
 # Snakebite & Google Cloud Dataflow are not Python 3 compatible :'(
 if PY3:
@@ -255,11 +275,12 @@ else:
 
 
 def do_setup():
-    verify_gpl_dependency()
     write_version()
     setup(
         name='apache-airflow',
         description='Programmatically author, schedule and monitor data pipelines',
+        long_description=long_description,
+        long_description_content_type='text/markdown',
         license='Apache License 2.0',
         version=version,
         packages=find_packages(exclude=['tests*']),
@@ -268,38 +289,40 @@ def do_setup():
         zip_safe=False,
         scripts=['airflow/bin/airflow'],
         install_requires=[
-            'alembic>=0.8.3, <0.9',
-            'bleach==2.1.2',
+            'alembic>=0.9, <1.0',
             'configparser>=3.5.0, <3.6.0',
             'croniter>=0.3.17, <0.4',
             'dill>=0.2.2, <0.3',
-            'flask>=0.12.4, <0.13',
-            'flask-appbuilder>=1.11.1, <2.0.0',
-            'flask-admin==1.4.1',
+            'enum34~=1.1.6;python_version<"3.4"',
+            'flask>=1.0, <2.0',
+            'flask-appbuilder==1.12.3',
+            'flask-admin==1.5.3',
             'flask-caching>=1.3.3, <1.4.0',
-            'flask-login==0.2.11',
+            'flask-login>=0.3, <0.5',
             'flask-swagger==0.2.13',
             'flask-wtf>=0.14.2, <0.15',
             'funcsigs==1.0.0',
             'future>=0.16.0, <0.17',
             'gitpython>=2.0.2',
-            'gunicorn>=19.4.0, <20.0',
+            'gunicorn>=19.5.0, <20.0',
             'iso8601>=0.1.12',
-            'jinja2>=2.7.3, <2.9.0',
-            'lxml>=3.6.0, <4.0',
+            'json-merge-patch==0.2',
+            'jinja2>=2.7.3, <=2.10.0',
+            'lxml>=4.0.0',
             'markdown>=2.5.2, <3.0',
             'pandas>=0.17.1, <1.0.0',
             'pendulum==1.4.4',
-            'psutil>=4.2.0, <5.0.0',
+            'psutil>=4.2.0, <6.0.0',
             'pygments>=2.0.1, <3.0',
             'python-daemon>=2.1.1, <2.2',
             'python-dateutil>=2.3, <3',
-            'python-nvd3==0.15.0',
-            'requests>=2.5.1, <3',
+            'requests>=2.20.0, <3',
             'setproctitle>=1.1.8, <2',
-            'sqlalchemy>=1.1.15, <1.2.0',
-            'tabulate>=0.7.5, <0.8.0',
-            'tenacity==4.8.0',
+            'sqlalchemy>=1.1.15, <1.3.0',
+            'tabulate>=0.7.5, <0.9',
+            'tenacity==4.12.0',
+            'text-unidecode==1.2',
+            'typing;python_version<"3.5"',
             'thrift>=0.9.2',
             'tzlocal>=1.4',
             'unicodecsv>=0.14.1',
@@ -314,9 +337,11 @@ def do_setup():
             'devel_ci': devel_ci,
             'all_dbs': all_dbs,
             'atlas': atlas,
-            'async': async,
+            'async': async_packages,
             'azure_blob_storage': azure_blob_storage,
             'azure_data_lake': azure_data_lake,
+            'azure_cosmos': azure_cosmos,
+            'azure_container_instances': azure_container_instances,
             'cassandra': cassandra,
             'celery': celery,
             'cgroups': cgroups,
@@ -327,13 +352,15 @@ def do_setup():
             'datadog': datadog,
             'devel': devel_minreq,
             'devel_hadoop': devel_hadoop,
+            'devel_azure': devel_azure,
             'doc': doc,
             'docker': docker,
             'druid': druid,
             'elasticsearch': elasticsearch,
             'emr': emr,
             'gcp_api': gcp_api,
-            'github_enterprise': github_enterprise,
+            'github_enterprise': flask_oauth,
+            'google_auth': flask_oauth,
             'hdfs': hdfs,
             'hive': hive,
             'jdbc': jdbc,
@@ -372,20 +399,20 @@ def do_setup():
             'Intended Audience :: System Administrators',
             'License :: OSI Approved :: Apache Software License',
             'Programming Language :: Python :: 2.7',
-            'Programming Language :: Python :: 3.4',
             'Programming Language :: Python :: 3.5',
             'Topic :: System :: Monitoring',
         ],
         author='Apache Software Foundation',
-        author_email='dev@airflow.incubator.apache.org',
-        url='http://airflow.incubator.apache.org/',
+        author_email='dev@airflow.apache.org',
+        url='http://airflow.apache.org/',
         download_url=(
-            'https://dist.apache.org/repos/dist/release/incubator/airflow/' + version),
+            'https://dist.apache.org/repos/dist/release/airflow/' + version),
         cmdclass={
             'test': Tox,
             'extra_clean': CleanCommand,
+            'compile_assets': CompileAssets
         },
-        python_requires='>=2.7,!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*',
+        python_requires='>=2.7,!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*',
     )
 
 

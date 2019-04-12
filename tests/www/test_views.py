@@ -20,6 +20,7 @@
 import io
 import copy
 import logging.config
+import mock
 import os
 import shutil
 import tempfile
@@ -29,8 +30,11 @@ import json
 
 from urllib.parse import quote_plus
 from werkzeug.test import Client
+from werkzeug.wrappers import BaseResponse
 
-from airflow import models, configuration, settings
+
+import airflow
+from airflow import models, configuration
 from airflow.config_templates.airflow_local_settings import DEFAULT_LOGGING_CONFIG
 from airflow.models import DAG, DagRun, TaskInstance
 from airflow.operators.dummy_operator import DummyOperator
@@ -66,7 +70,7 @@ class TestChartModelView(unittest.TestCase):
         self.chart = {
             'label': 'chart',
             'owner': 'airflow',
-            'conn_id': 'airflow_ci',
+            'conn_id': 'airflow_db',
         }
 
     def tearDown(self):
@@ -155,8 +159,6 @@ class TestVariableView(unittest.TestCase):
         response = self.app.get('/admin/variable', follow_redirects=True)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.session.query(models.Variable).count(), 1)
-        self.assertIn('<span class="label label-danger">Invalid</span>',
-                      response.data.decode('utf-8'))
 
     def test_xss_prevention(self):
         xss = "/admin/airflow/variables/asdf<img%20src=''%20onerror='alert(1);'>"
@@ -385,6 +387,28 @@ class TestLogView(unittest.TestCase):
         self.assertIn('Log by attempts',
                       response.data.decode('utf-8'))
 
+    def test_get_logs_with_metadata_as_download_file(self):
+        url_template = "/admin/airflow/get_logs_with_metadata?dag_id={}&" \
+                       "task_id={}&execution_date={}&" \
+                       "try_number={}&metadata={}&format=file"
+        try_number = 1
+        url = url_template.format(self.DAG_ID,
+                                  self.TASK_ID,
+                                  quote_plus(self.DEFAULT_DATE.isoformat()),
+                                  try_number,
+                                  json.dumps({}))
+        response = self.app.get(url)
+        expected_filename = '{}/{}/{}/{}.log'.format(self.DAG_ID,
+                                                     self.TASK_ID,
+                                                     self.DEFAULT_DATE.isoformat(),
+                                                     try_number)
+
+        content_disposition = response.headers.get('Content-Disposition')
+        self.assertTrue(content_disposition.startswith('attachment'))
+        self.assertTrue(expected_filename in content_disposition)
+        self.assertEqual(200, response.status_code)
+        self.assertIn('Log for testing.', response.data.decode('utf-8'))
+
     def test_get_logs_with_metadata(self):
         url_template = "/admin/airflow/get_logs_with_metadata?dag_id={}&" \
                        "task_id={}&execution_date={}&" \
@@ -450,6 +474,28 @@ class TestVarImportView(unittest.TestCase):
         session.close()
         super(TestVarImportView, cls).tearDownClass()
 
+    def test_import_variable_fail(self):
+        with mock.patch('airflow.models.Variable.set') as set_mock:
+            set_mock.side_effect = UnicodeEncodeError
+            content = '{"fail_key": "fail_val"}'
+
+            try:
+                # python 3+
+                bytes_content = io.BytesIO(bytes(content, encoding='utf-8'))
+            except TypeError:
+                # python 2.7
+                bytes_content = io.BytesIO(bytes(content))
+            response = self.app.post(
+                self.IMPORT_ENDPOINT,
+                data={'file': (bytes_content, 'test.json')},
+                follow_redirects=True
+            )
+            self.assertEqual(response.status_code, 200)
+            session = Session()
+            db_dict = {x.key: x.get_val() for x in session.query(models.Variable).all()}
+            session.close()
+            self.assertNotIn('fail_key', db_dict)
+
     def test_import_variables(self):
         content = ('{"str_key": "str_value", "int_key": 60,'
                    '"list_key": [1, 2], "dict_key": {"k_a": 2, "k_b": 3}}')
@@ -465,43 +511,50 @@ class TestVarImportView(unittest.TestCase):
             follow_redirects=True
         )
         self.assertEqual(response.status_code, 200)
-        body = response.data.decode('utf-8')
-        self.assertIn('str_key', body)
-        self.assertIn('int_key', body)
-        self.assertIn('list_key', body)
-        self.assertIn('dict_key', body)
-        self.assertIn('str_value', body)
-        self.assertIn('60', body)
-        self.assertIn('[1, 2]', body)
-        # As dicts are not ordered, we may get any of the following cases.
-        case_a_dict = '{&#34;k_a&#34;: 2, &#34;k_b&#34;: 3}'
-        case_b_dict = '{&#34;k_b&#34;: 3, &#34;k_a&#34;: 2}'
+        session = Session()
+        # Extract values from Variable
+        db_dict = {x.key: x.get_val() for x in session.query(models.Variable).all()}
+        session.close()
+        self.assertIn('str_key', db_dict)
+        self.assertIn('int_key', db_dict)
+        self.assertIn('list_key', db_dict)
+        self.assertIn('dict_key', db_dict)
+        self.assertEqual('str_value', db_dict['str_key'])
+        self.assertEqual('60', db_dict['int_key'])
+        self.assertEqual('[1, 2]', db_dict['list_key'])
+
+        case_a_dict = '{"k_a": 2, "k_b": 3}'
+        case_b_dict = '{"k_b": 3, "k_a": 2}'
         try:
-            self.assertIn(case_a_dict, body)
+            self.assertEqual(case_a_dict, db_dict['dict_key'])
         except AssertionError:
-            self.assertIn(case_b_dict, body)
+            self.assertEqual(case_b_dict, db_dict['dict_key'])
 
 
 class TestMountPoint(unittest.TestCase):
-    def setUp(self):
-        super(TestMountPoint, self).setUp()
+    @classmethod
+    def setUpClass(cls):
         configuration.load_test_config()
         configuration.conf.set("webserver", "base_url", "http://localhost:8080/test")
-        config = dict()
-        config['WTF_CSRF_METHODS'] = []
         # Clear cached app to remount base_url forcefully
         application.app = None
-        app = application.cached_app(config=config, testing=True)
-        self.client = Client(app)
+        app = application.cached_app(config={'WTF_CSRF_ENABLED': False}, testing=True)
+        cls.client = Client(app, BaseResponse)
+
+    @classmethod
+    def tearDownClass(cls):
+        application.app = None
+        application.appbuilder = None
 
     def test_mount(self):
-        response, _, _ = self.client.get('/', follow_redirects=True)
-        txt = b''.join(response)
-        self.assertEqual(b"Apache Airflow is not at this location", txt)
+        # Test an endpoint that doesn't need auth!
+        resp = self.client.get('/test/health')
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(b"healthy", resp.data)
 
-        response, _, _ = self.client.get('/test', follow_redirects=True)
-        resp_html = b''.join(response)
-        self.assertIn(b"DAGs", resp_html)
+    def test_not_found(self):
+        resp = self.client.get('/', follow_redirects=True)
+        self.assertEqual(resp.status_code, 404)
 
 
 class ViewWithDateTimeAndNumRunsAndDagRunsFormTester:
@@ -744,6 +797,146 @@ class TestGanttView(unittest.TestCase):
 
     def test_dt_nr_dr_form_with_base_date_and_num_runs_and_execution_date_within(self):
         self.tester.test_with_base_date_and_num_runs_and_execution_date_within()
+
+
+class TestTaskInstanceView(unittest.TestCase):
+    TI_ENDPOINT = '/admin/taskinstance/?flt2_execution_date_greater_than={}'
+
+    def setUp(self):
+        super(TestTaskInstanceView, self).setUp()
+        configuration.load_test_config()
+        app = application.create_app(testing=True)
+        app.config['WTF_CSRF_METHODS'] = []
+        self.app = app.test_client()
+
+    def test_start_date_filter(self):
+        resp = self.app.get(self.TI_ENDPOINT.format('2018-10-09+22:44:31'))
+        # We aren't checking the logic of the date filter itself (that is built
+        # in to flask-admin) but simply that our UTC conversion was run - i.e. it
+        # doesn't blow up!
+        self.assertEqual(resp.status_code, 200)
+
+
+class TestDeleteDag(unittest.TestCase):
+
+    def setUp(self):
+        conf.load_test_config()
+        app = application.create_app(testing=True)
+        app.config['WTF_CSRF_METHODS'] = []
+        self.app = app.test_client()
+
+    def test_delete_dag_button_normal(self):
+        resp = self.app.get('/', follow_redirects=True)
+        self.assertIn('/delete?dag_id=example_bash_operator', resp.data.decode('utf-8'))
+        self.assertIn("return confirmDeleteDag(this, 'example_bash_operator')", resp.data.decode('utf-8'))
+
+    def test_delete_dag_button_for_dag_on_scheduler_only(self):
+        # Test for JIRA AIRFLOW-3233 (PR 4069):
+        # The delete-dag URL should be generated correctly for DAGs
+        # that exist on the scheduler (DB) but not the webserver DagBag
+
+        test_dag_id = "non_existent_dag"
+
+        session = Session()
+        DM = models.DagModel
+        session.query(DM).filter(DM.dag_id == 'example_bash_operator').update({'dag_id': test_dag_id})
+        session.commit()
+
+        resp = self.app.get('/', follow_redirects=True)
+        self.assertIn('/delete?dag_id={}'.format(test_dag_id), resp.data.decode('utf-8'))
+        self.assertIn("return confirmDeleteDag(this, '{}')".format(test_dag_id), resp.data.decode('utf-8'))
+
+        session.query(DM).filter(DM.dag_id == test_dag_id).update({'dag_id': 'example_bash_operator'})
+        session.commit()
+
+
+class TestTriggerDag(unittest.TestCase):
+
+    def setUp(self):
+        conf.load_test_config()
+        app = application.create_app(testing=True)
+        app.config['WTF_CSRF_METHODS'] = []
+        self.app = app.test_client()
+        self.session = Session()
+        models.DagBag().get_dag("example_bash_operator").sync_to_db()
+
+    def test_trigger_dag_button_normal_exist(self):
+        resp = self.app.get('/', follow_redirects=True)
+        self.assertIn('/trigger?dag_id=example_bash_operator', resp.data.decode('utf-8'))
+        self.assertIn("return confirmDeleteDag(this, 'example_bash_operator')", resp.data.decode('utf-8'))
+
+    def test_trigger_dag_button(self):
+
+        test_dag_id = "example_bash_operator"
+
+        DR = models.DagRun
+        self.session.query(DR).delete()
+        self.session.commit()
+
+        self.app.post('/admin/airflow/trigger?dag_id={}'.format(test_dag_id))
+
+        run = self.session.query(DR).filter(DR.dag_id == test_dag_id).first()
+        self.assertIsNotNone(run)
+        self.assertIn("manual__", run.run_id)
+
+
+class HelpersTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = application.create_app(testing=True)
+
+        airflow.load_login()
+        # Delay this import until here
+        import airflow.www.views as views
+        cls.views = views
+
+    def test_state_token(self):
+        # It's shouldn't possible to set these odd values anymore, but lets
+        # ensure they are escaped!
+        html = str(self.views.state_token('<script>alert(1)</script>'))
+
+        self.assertIn(
+            '&lt;script&gt;alert(1)&lt;/script&gt;',
+            html,
+        )
+        self.assertNotIn(
+            '<script>alert(1)</script>',
+            html,
+        )
+
+    def test_task_instance_link(self):
+        mock_task = mock.Mock(dag_id='<a&1>', task_id='<b2>', execution_date=datetime(2017, 10, 12))
+        with self.app.test_request_context():
+            html = str(self.views.task_instance_link(
+                v=None, c=None, m=mock_task, p=None
+            ))
+
+        self.assertIn('%3Ca%261%3E', html)
+        self.assertIn('%3Cb2%3E', html)
+        self.assertNotIn('<a&1>', html)
+        self.assertNotIn('<b2>', html)
+
+    def test_dag_link(self):
+        mock_dag = mock.Mock(dag_id='<a&1>', execution_date=datetime(2017, 10, 12))
+        with self.app.test_request_context():
+            html = str(self.views.dag_link(
+                v=None, c=None, m=mock_dag, p=None
+            ))
+
+        self.assertIn('%3Ca%261%3E', html)
+        self.assertNotIn('<a&1>', html)
+
+    def test_dag_run_link(self):
+        mock_run = mock.Mock(dag_id='<a&1>', run_id='<b2>', execution_date=datetime(2017, 10, 12))
+        with self.app.test_request_context():
+            html = str(self.views.dag_run_link(
+                v=None, c=None, m=mock_run, p=None
+            ))
+
+        self.assertIn('%3Ca%261%3E', html)
+        self.assertIn('%3Cb2%3E', html)
+        self.assertNotIn('<a&1>', html)
+        self.assertNotIn('<b2>', html)
 
 
 if __name__ == '__main__':
