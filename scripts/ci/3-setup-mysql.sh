@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+<<<<<<< HEAD:scripts/ci/kubernetes/docker/compile.sh
+#
+=======
+>>>>>>> v1-10-stable-upstream-apache:scripts/ci/3-setup-mysql.sh
 #  Licensed to the Apache Software Foundation (ASF) under one   *
 #  or more contributor license agreements.  See the NOTICE file *
 #  distributed with this work for additional information        *
@@ -16,6 +20,21 @@
 #  specific language governing permissions and limitations      *
 #  under the License.                                           *
 
+<<<<<<< HEAD:scripts/ci/kubernetes/docker/compile.sh
+set -e
+
+export DEBIAN_FRONTEND=noninteractive
+
+apt-get update
+apt-get install -y --no-install-recommends curl gnupg2
+
+curl -sL https://deb.nodesource.com/setup_8.x | bash -
+
+apt-get update
+apt-get install -y --no-install-recommends git nodejs
+pip install GitPython
+python setup.py compile_assets sdist -q
+=======
 set -exuo pipefail
 
 MYSQL_HOST=mysql
@@ -28,3 +47,4 @@ for ((i=0; i<retries; i++)); do
 done
 
 echo "mysql db creation could not succeed" && exit 1
+>>>>>>> v1-10-stable-upstream-apache:scripts/ci/3-setup-mysql.sh

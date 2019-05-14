@@ -29,7 +29,6 @@ import logging
 import math
 import os
 import traceback
-import re
 from collections import defaultdict
 from datetime import timedelta
 from functools import wraps
@@ -56,7 +55,7 @@ from pygments.formatters import HtmlFormatter
 from sqlalchemy import or_, desc, and_, union_all
 from wtforms import (
     Form, SelectField, TextAreaField, PasswordField,
-    StringField, validators)
+    StringField, IntegerField, validators)
 
 import airflow
 from airflow import configuration as conf
@@ -115,10 +114,14 @@ def dag_link(v, c, m, p):
     if m.dag_id is None:
         return Markup()
 
-    url = url_for(
-        'airflow.graph',
-        dag_id=m.dag_id,
-        execution_date=m.execution_date)
+    kwargs = {'dag_id': m.dag_id}
+
+    # This is called with various objects, TIs, (ORM) DAG - some have this,
+    # some don't
+    if hasattr(m, 'execution_date'):
+        kwargs['execution_date'] = m.execution_date
+
+    url = url_for('airflow.graph', **kwargs)
     return Markup(
         '<a href="{}">{}</a>').format(url, m.dag_id)
 
@@ -213,7 +216,7 @@ def label_link(v, c, m, p):
 def pool_link(v, c, m, p):
     title = m.pool
 
-    url = url_for('airflow.task', flt1_pool_equals=m.pool)
+    url = url_for('taskinstance.index_view', flt1_pool_equals=m.pool)
     return Markup("<a href='{url}'>{title}</a>").format(**locals())
 
 
@@ -430,8 +433,8 @@ class Airflow(BaseView):
         payload['label'] = label
 
         pd.set_option('display.max_colwidth', 100)
-        hook = db.get_hook()
         try:
+            hook = db.get_hook()
             df = hook.get_pandas_df(
                 wwwutils.limit_sql(sql, CHART_LIMIT, conn_type=db.conn_type))
             df = df.fillna(0)
@@ -1094,8 +1097,8 @@ class Airflow(BaseView):
         ignore_task_deps = request.form.get('ignore_task_deps') == "true"
         ignore_ti_state = request.form.get('ignore_ti_state') == "true"
 
-        from airflow.executors import GetDefaultExecutor
-        executor = GetDefaultExecutor()
+        from airflow.executors import get_default_executor
+        executor = get_default_executor()
         valid_celery_config = False
         valid_kubernetes_config = False
 
@@ -1523,7 +1526,7 @@ class Airflow(BaseView):
         min_date = min(dates) if dates else None
 
         tis = dag.get_task_instances(
-            session, start_date=min_date, end_date=base_date)
+            start_date=min_date, end_date=base_date, session=session)
         task_instances = {}
         for ti in tis:
             tid = alchemy_to_dict(ti)
@@ -1665,7 +1668,7 @@ class Airflow(BaseView):
 
         task_instances = {
             ti.task_id: alchemy_to_dict(ti)
-            for ti in dag.get_task_instances(session, dttm, dttm)}
+            for ti in dag.get_task_instances(dttm, dttm, session=session)}
         tasks = {
             t.task_id: {
                 'dag_id': t.dag_id,
@@ -1740,7 +1743,7 @@ class Airflow(BaseView):
         cum_y = defaultdict(list)
 
         tis = dag.get_task_instances(
-            session, start_date=min_date, end_date=base_date)
+            start_date=min_date, end_date=base_date, session=session)
         TF = models.TaskFail
         ti_fails = (
             session
@@ -1845,8 +1848,9 @@ class Airflow(BaseView):
         for task in dag.tasks:
             y = []
             x = []
-            for ti in task.get_task_instances(session, start_date=min_date,
-                                              end_date=base_date):
+            for ti in task.get_task_instances(start_date=min_date,
+                                              end_date=base_date,
+                                              session=session):
                 dttm = wwwutils.epoch(ti.execution_date)
                 x.append(dttm)
                 y.append(ti.try_number)
@@ -1854,7 +1858,7 @@ class Airflow(BaseView):
                 chart.add_serie(name=task.task_id, x=x, y=y)
 
         tis = dag.get_task_instances(
-            session, start_date=min_date, end_date=base_date)
+            start_date=min_date, end_date=base_date, session=session)
         tries = sorted(list({ti.try_number for ti in tis}))
         max_date = max([ti.execution_date for ti in tis]) if tries else None
 
@@ -1909,8 +1913,9 @@ class Airflow(BaseView):
         for task in dag.tasks:
             y[task.task_id] = []
             x[task.task_id] = []
-            for ti in task.get_task_instances(session, start_date=min_date,
-                                              end_date=base_date):
+            for ti in task.get_task_instances(start_date=min_date,
+                                              end_date=base_date,
+                                              session=session):
                 if ti.end_date:
                     ts = ti.execution_date
                     following_schedule = dag.following_schedule(ts)
@@ -1935,7 +1940,7 @@ class Airflow(BaseView):
                                 y=scale_time_units(y[task.task_id], y_unit))
 
         tis = dag.get_task_instances(
-            session, start_date=min_date, end_date=base_date)
+            start_date=min_date, end_date=base_date, session=session)
         dates = sorted(list({ti.execution_date for ti in tis}))
         max_date = max([ti.execution_date for ti in tis]) if dates else None
 
@@ -2020,7 +2025,7 @@ class Airflow(BaseView):
         form.execution_date.choices = dt_nr_dr_data['dr_choices']
 
         tis = [
-            ti for ti in dag.get_task_instances(session, dttm, dttm)
+            ti for ti in dag.get_task_instances(dttm, dttm, session=session)
             if ti.start_date]
         tis = sorted(tis, key=lambda ti: ti.start_date)
         TF = models.TaskFail
@@ -2095,7 +2100,7 @@ class Airflow(BaseView):
 
         task_instances = {
             ti.task_id: alchemy_to_dict(ti)
-            for ti in dag.get_task_instances(session, dttm, dttm)}
+            for ti in dag.get_task_instances(dttm, dttm, session=session)}
 
         return json.dumps(task_instances)
 
@@ -2261,8 +2266,13 @@ class QueryView(wwwutils.DataProfilingMixin, BaseView):
     def query(self, session=None):
         dbs = session.query(Connection).order_by(Connection.conn_id).all()
         session.expunge_all()
-        db_choices = list(
-            ((db.conn_id, db.conn_id) for db in dbs if db.get_hook()))
+        db_choices = []
+        for db in dbs:
+            try:
+                if db.get_hook():
+                    db_choices.append((db.conn_id, db.conn_id))
+            except Exception:
+                pass
         conn_id_str = request.form.get('conn_id')
         csv = request.form.get('csv') == "true"
         sql = request.form.get('sql')
@@ -2280,8 +2290,8 @@ class QueryView(wwwutils.DataProfilingMixin, BaseView):
         error = False
         if conn_id_str and request.method == 'POST':
             db = [db for db in dbs if db.conn_id == conn_id_str][0]
-            hook = db.get_hook()
             try:
+                hook = db.get_hook()
                 df = hook.get_pandas_df(wwwutils.limit_sql(sql, QUERY_LIMIT, conn_type=db.conn_type))
                 # df = hook.get_pandas_df(sql)
                 has_data = len(df) > 0
@@ -2945,7 +2955,7 @@ class TaskInstanceModelView(ModelViewOnly):
                     tis.append(ti)
 
             for dag, tis in dag_to_tis.items():
-                models.clear_task_instances(tis, session, dag=dag)
+                models.clear_task_instances(tis, session=session, dag=dag)
 
             session.commit()
 
@@ -3008,6 +3018,10 @@ class ConnectionModelView(wwwutils.SuperUserMixin, AirflowModelView):
         'extra__google_cloud_platform__key_path',
         'extra__google_cloud_platform__keyfile_dict',
         'extra__google_cloud_platform__scope',
+        'extra__google_cloud_platform__num_retries',
+        'extra__grpc__auth_type',
+        'extra__grpc__credentials_pem_file',
+        'extra__grpc__scopes',
     )
     verbose_name = "Connection"
     verbose_name_plural = "Connections"
@@ -3030,6 +3044,10 @@ class ConnectionModelView(wwwutils.SuperUserMixin, AirflowModelView):
         'extra__google_cloud_platform__key_path': StringField('Keyfile Path'),
         'extra__google_cloud_platform__keyfile_dict': PasswordField('Keyfile JSON'),
         'extra__google_cloud_platform__scope': StringField('Scopes (comma separated)'),
+        'extra__google_cloud_platform__num_retries': IntegerField('Number of Retries'),
+        'extra__grpc__auth_type': StringField('Grpc Auth Type'),
+        'extra__grpc__credentials_pem_file': StringField('Credential Keyfile Path'),
+        'extra__grpc__scopes': StringField('Scopes (comma separated)'),
     }
     form_choices = {
         'conn_type': Connection._types
@@ -3037,7 +3055,7 @@ class ConnectionModelView(wwwutils.SuperUserMixin, AirflowModelView):
 
     def on_model_change(self, form, model, is_created):
         formdata = form.data
-        if formdata['conn_type'] in ['jdbc', 'google_cloud_platform']:
+        if formdata['conn_type'] in ['jdbc', 'google_cloud_platform', 'gprc']:
             extra = {
                 key: formdata[key]
                 for key in self.form_extra_fields.keys() if key in formdata}
